@@ -1,0 +1,2 @@
+spectrum-dark.json
+spectrum-light.json
