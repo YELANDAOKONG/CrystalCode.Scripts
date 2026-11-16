@@ -11,6 +11,8 @@ $ErrorActionPreference = "Stop"
 $repository = "YELANDAOKONG/CrystalCode"
 $pluginRepository = "YELANDAOKONG/CrystalCode.Plugins.Web"
 $pluginDirectoryName = "web"
+$webRepository = "YELANDAOKONG/CrystalCode.Web"
+$webArchiveName = "CrystalCode-Web.zip"
 $scriptsBase = "https://raw.githubusercontent.com/YELANDAOKONG/CrystalCode.Scripts/master"
 $defaultsBase = "https://raw.githubusercontent.com/YELANDAOKONG/CrystalCode.Defaults/master"
 $crystalHome = if (-not [string]::IsNullOrWhiteSpace($env:CRYSTAL_HOME)) { $env:CRYSTAL_HOME } else { Join-Path $HOME ".crystal" }
@@ -587,11 +589,75 @@ function Install-Plugin {
     }
 }
 
+# Installs the latest web client into web/ when it is missing or empty. The
+# archive holds the built site at its root, so it extracts straight into web/.
+function Install-Web {
+    $webTarget = Join-Path $crystalHome "web"
+
+    $state = Get-DirectoryState $webTarget
+    if ($state -eq "used") {
+        Write-Step "skip" "web" "$webTarget already has files"
+        return
+    }
+
+    if ($state -eq "file") {
+        Write-Step "fail" "web" "$webTarget exists and is not a directory"
+        return
+    }
+
+    $webArchivePath = Join-Path $temporaryDirectory $webArchiveName
+    $webUrl = "https://github.com/$webRepository/releases/latest/download/$webArchiveName"
+
+    $downloaded = $false
+    if ($Styled) {
+        Write-Host ("  " + $Muted + "[....]" + $Reset + " web       Downloading $webArchiveName")
+        $downloaded = Receive-CrystalArchive $webUrl $webArchivePath $webArchiveName
+        Clear-Lines 2
+    }
+    else {
+        Write-Host "Downloading $webArchiveName..."
+        $downloaded = -not (Get-RemoteFile $webUrl $webArchivePath)
+    }
+
+    if (-not $downloaded) {
+        Write-Step "fail" "web" "Could not download $webArchiveName from the latest release"
+        return
+    }
+
+    $webExtraction = Join-Path $temporaryDirectory "web"
+    try {
+        Expand-Archive -LiteralPath $webArchivePath -DestinationPath $webExtraction -Force
+    }
+    catch {
+        Write-Step "fail" "web" "Could not extract ${webArchiveName}: $($_.Exception.Message)"
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $webExtraction "index.html") -PathType Leaf)) {
+        Write-Step "fail" "web" "$webArchiveName does not contain index.html"
+        return
+    }
+
+    try {
+        New-Item -ItemType Directory -Path $webTarget -Force | Out-Null
+        Copy-Item -Path (Join-Path $webExtraction "*") -Destination $webTarget -Recurse -Force
+    }
+    catch {
+        # web/ was missing or empty before this step, so it is ours to remove.
+        Remove-Item -LiteralPath $webTarget -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Step "fail" "web" "Could not write files to ${webTarget}: $($_.Exception.Message)"
+        return
+    }
+
+    Write-Step "ok" "web" "Installed web client to $webTarget"
+}
+
 function Install-Extras {
     Write-Host ""
-    Write-Host ($Muted + "Setting up plugins, providers, and themes..." + $Reset)
+    Write-Host ($Muted + "Setting up web, plugins, providers, and themes..." + $Reset)
     Write-Host ""
 
+    try { Install-Web } catch { Write-Step "fail" "web" $_.Exception.Message }
     # A step reports its own failures. This catches only what it did not foresee.
     try { Install-Plugin } catch { Write-Step "fail" "plugins" $_.Exception.Message }
     try { Install-Catalog "providers" "providers.txt" "providers" (Join-Path $crystalHome "providers") } catch { Write-Step "fail" "providers" $_.Exception.Message }

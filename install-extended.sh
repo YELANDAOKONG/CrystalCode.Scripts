@@ -9,6 +9,8 @@ set -eu
 repository="YELANDAOKONG/CrystalCode"
 plugin_repository="YELANDAOKONG/CrystalCode.Plugins.Web"
 plugin_directory_name="web"
+web_repository="YELANDAOKONG/CrystalCode.Web"
+web_archive_name="CrystalCode-Web.zip"
 scripts_base="https://raw.githubusercontent.com/YELANDAOKONG/CrystalCode.Scripts/master"
 defaults_base="https://raw.githubusercontent.com/YELANDAOKONG/CrystalCode.Defaults/master"
 crystal_home="${CRYSTAL_HOME:-${HOME:?HOME must be set}/.crystal}"
@@ -705,8 +707,64 @@ install_plugin() {
     fi
 }
 
+# Installs the latest web client into web/ when it is missing or empty. The
+# archive holds the built site at its root, so it extracts straight into web/.
+install_web() {
+    web_target="${crystal_home}/web"
+
+    web_state=0
+    directory_state "$web_target" || web_state=$?
+    case "$web_state" in
+        1)
+            report_step skip web "${web_target} already has files"
+            return 0
+            ;;
+        2)
+            report_step fail web "${web_target} exists and is not a directory"
+            return 0
+            ;;
+    esac
+
+    web_archive_path="${working_directory}/${web_archive_name}"
+    web_url="https://github.com/${web_repository}/releases/latest/download/${web_archive_name}"
+
+    announce_step web "Downloading ${web_archive_name}"
+    if ! download_archive "$web_url" "$web_archive_path" "$web_archive_name"; then
+        if [ "$styled" = true ]; then
+            erase_lines 2
+        fi
+        report_step fail web "Could not download ${web_archive_name} from the latest release"
+        return 0
+    fi
+    if [ "$styled" = true ]; then
+        erase_lines 2
+    fi
+
+    web_extraction="${working_directory}/web"
+    mkdir -p "$web_extraction"
+    if ! unzip -qo "$web_archive_path" -d "$web_extraction"; then
+        report_step fail web "Could not extract ${web_archive_name}"
+        return 0
+    fi
+
+    if [ ! -f "${web_extraction}/index.html" ]; then
+        report_step fail web "${web_archive_name} does not contain index.html"
+        return 0
+    fi
+
+    if ! mkdir -p "$web_target" || ! cp -R "$web_extraction"/. "$web_target"/; then
+        # web/ was missing or empty before this step, so it is ours to remove.
+        rm -rf -- "$web_target"
+        report_step fail web "Could not write files to ${web_target}"
+        return 0
+    fi
+
+    report_step ok web "Installed web client to ${web_target}"
+}
+
 install_extras() {
-    printf '\n%sSetting up plugins, providers, and themes...%s\n\n' "$MUTED" "$NC"
+    printf '\n%sSetting up web, plugins, providers, and themes...%s\n\n' "$MUTED" "$NC"
+    install_web
     install_plugin
     install_providers
     install_themes
